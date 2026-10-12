@@ -34,7 +34,7 @@ from .board import BLACK, EMPTY, WHITE, Board, Change
 from .engine import Plan
 from .pattern import answer_points, five_on_board, safety_note
 
-DEFAULT_DOC = Path("/Users/lwl/Documents/Qoder/2026-09-10/gomoku-lessons.md")
+DEFAULT_DOC = Path.home() / "Documents" / "gomoku-lessons.md"   # 放「文稿」；写成 home 相对路径，换机器/改用户名都不必动代码
 TITLE = "# Gomoku 盯屏助手 · 复盘经验"
 
 WIN = "胜"
