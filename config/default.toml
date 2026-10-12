@@ -1,0 +1,64 @@
+# 阈值全部来自 2026-09-10 在真机截图上的实测（见 memory/project-board-geometry.md）。
+# 改这里之前先跑 `python -m unittest discover -s tests`，golden file 必须全绿。
+
+[board]
+size = 15
+sample_radius = 6        # 每个交叉点取 (2r+1)^2 亮度的中位数，实测 r=3..12 结果不变
+black_max_lum = 120      # 实测黑子中位亮度 ~47，空格 ~210，余量充足
+white_min_lum = 170      # 白子亮度是空量子集，只能靠色度判据，故下限留足余量
+max_warmth = 40          # R-B：星位 ~85，黑白子 ~0-40，靠这条排除星位
+# 这里曾经有过第三条判据 white_solid_min_lum（整窗亮度低分位），用来挡一枚号称半透明的光标
+# 落子预览。09-11 复核：那颗盘直径 47px、盖内低分位 207 与真白子一致，网格线一点都不透，它是
+# 人机刚落、带着黑色「＋」提示的实心白子。判据已删；再加判据前先拿截图证据。
+
+[wood]
+min_r = 225
+min_g = 195
+min_b = 130
+max_b = 215
+min_rb_gap = 35
+
+[grid]
+dip_offset = 12          # 网格线判据：列中位亮度低于基线该值才算线；calibrate.verify_grid 复用格点的门禁沿用同一个值
+merge_gap = 2            # 相邻峰合并成一条线
+max_spacing_cv = 0.06    # 格距变异数上限，超过说明检出的不是网格
+
+[capture]
+interval_s = 0.3
+roi_expand = 1.35        # 锁定后按棋盘面 bbox 外扩跟随；ROI 一拍端到端实测 198ms（全屏 215–445ms）
+roi_relocate_fails = 2   # 连续 N 拍标定失败就退回全屏重新定位
+# ROI 耗时与区域大小基本无关：screencapture+解码 69–86ms，标定 25ms，解析 1ms（1082px 见方）
+
+[state]
+confirm_ticks = 1        # 新子读到即提交。2 是当初按「可能有落子动画中间帧」保守定的，从没被证实过
+max_changes = 3          # 正常一手只动 1 个点，超过即过渡帧或标定漂移，整拍丢弃
+resync_ticks = 6         # 同一异常局面连续 N 拍稳定不变 → 按新基准重同步（重开一局/悔棋）
+# confirm_ticks 定 1 的依据（两份独立样本， tools/probe_state.py 可重放）：
+#   · 2026-09-11 50ms 档 563 拍 / 40 颗子：40/40 都是 "." 一帧变实心盘，「出现又消失」0 处、
+#     变色 0 处 —— 任何持续 >152ms 的中间帧都会被抓到，一次没有。
+#   · 2026-09-10 本日志 40 拍 / 14 手：最短的一处读数也只活了 4 拍，1 拍和 2 拍的各 0 处；
+#     confirm_ticks 取 1/2/3 提交的手数一模一样（14 手）。
+#   ⇒ 2 那一档没拦住过任何东西，只让每一手都多等一拍（0.3s），而这一拍是压在
+#     「人机落了子→我才拿到建议」那条时效链上的。设回 2 仍可用作消抖，代码路径留着。
+# 2026-09-11 实盘：获胜连五整排 ~2Hz 闪烁，每个态最长连续 3 拍 —— N=3 时闪灭那一拍
+# （凭空少 5 子的不可能形状）会被当成新基准重灌，所以至少翻倍。
+# max_changes = 3 是**有实据的一条**：正常一手最多动 2 个点（09-10 40 拍里单拍变化数
+# 0/1/2 三种，从没到过 3），而获胜五连闪烁一轮就动 5 个 —— 阈值往松了调就把坏盘放出去。
+# 2026-09-10 实盘日志：14:11:07.218 一拍内同时出现 F9:.->X 与 C12:.->O，
+# 故状态层不得假设双方轮流落子，执子色只能来自像素分类。
+
+[play]
+my_colour = "auto"       # 用户执黑还是执白只有用户知道，不能从石子奇偶反推（两局实盘都推反过）。
+                         # auto = advise 启动时问一次；也可直接写 black/white（或 黑/白）免问。
+
+[engine]
+binary = "vendor/rapfi/pbrain-rapfi-macos-apple-silicon"
+timeout_ms = 1500        # 实测这一档到 depth 21-26 / 596K nps；引擎在 MaxTime 处收尾，不会超预算
+                         # 离线复盘不管时效，那一支由 `review --engine-ms` 单独放宽（默认 6000）
+
+[llm]
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash-vision-exp"   # 2026-09-10 真机联调可用；explain 走纯文字。注意 v4 系是 reasoning 模型，explain 层必须带 thinking:{type:"disabled"}（explain.py 已写死），否则 max_tokens 会被 reasoning_content 整预算吃光、content 回空串。关掉后实测 0.9–1.1s 回话、155 token
+api_key_env = "DEEPSEEK_API_KEY"          # 密钥只从环境变量或仓库根 .env 读，不进本文件、不进日志
+timeout_ms = 15000     # 讲解在后台线程里发，慢一点也不阻塞推荐；实测关推理 1s 上下，超了就只打一行降级提示
+max_tokens = 500       # 任务要求 100–180 字中文；关推理后实测 155 token，留一倍余量
